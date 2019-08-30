@@ -1,0 +1,10 @@
+# build files
+*.bin
+*.o*
+*.elf
+*.hex
+target/
+
+# visual studio
+.vscode
+
