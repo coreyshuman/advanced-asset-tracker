@@ -233,7 +233,7 @@ void sleep() {
     fuel.sleep();
 
     // reset the accelerometer interrupt so we can sleep without instantly waking
-    bool awake = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
+    volatile bool awake = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
     System.sleep(SLEEP_MODE_DEEP, HOW_LONG_SHOULD_WE_SLEEP);
 }
 
@@ -353,15 +353,12 @@ void publishLocation() {
 
 
 bool hasMotion() {
-   // bool motion = digitalRead(WKP);
-
-    uint8_t regValue = accel.readRegister8(accel.REG_INT1_SRC);
-    bool motion = ((regValue & accel.INT1_SRC_IA) != 0);
+    bool motion = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
 
     digitalWrite(D7, (motion) ? HIGH : LOW);
 
     if (motion) {
-        initAccel();
+        //initAccel();
     }
 
     return motion;
@@ -377,7 +374,10 @@ void checkMotion(unsigned long now) {
         // Activate GPS module if inactive
         if(!gpsActivated()) {
             activateGPS();
+            delay(250);
+            initAccel();
         }
+        
 
         if (Particle.connected() == false) {
             // Init GPS now, gives the module a little time to fix while particle connects
@@ -386,6 +386,7 @@ void checkMotion(unsigned long now) {
             Particle.connect();
             Particle.publish(PREFIX + String("s"), "motion_checkin", 1800, PRIVATE);
         }
+        
     }
 }
 
@@ -494,6 +495,7 @@ void loop() {
         initAccel();
         Serial.print("!"); // cts debug
     } else {
+        /*
         if ((now - lastAcceMessage) > 1000) {
             lastAcceMessage = now;
             uint16_t accelMag = accel.readXYZmagnitude();
@@ -507,6 +509,7 @@ void loop() {
 
             }
         }
+        */
     }
 
     /* Check to see if we've seen any motion
