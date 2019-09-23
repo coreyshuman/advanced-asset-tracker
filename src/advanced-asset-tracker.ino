@@ -47,7 +47,10 @@ SerialDebugOutput debugOutput;
 
 // Threshold to trigger a publish
 // 9000 is VERY sensitive, 12000 will still detect small bumps
-int accelThreshold = 12000;
+int accelThreshold = 22000;
+
+// 16mg per point
+int wakeThreshold = 32;
 
 
 // SYSTEM_THREAD(ENABLED);
@@ -72,12 +75,12 @@ unsigned long GPS_DEACTIVATED_AT = 0;
 unsigned long GPS_NO_FIX_SHUTDOWN = 10 * MINUTE;
 unsigned long GPS_NO_FIX_STARTUP  = 10 * MINUTE;
 
-bool PUBLISH_MODE = false; // Publish by default [cts debug]
+bool PUBLISH_MODE = true; // Publish by default
 
 bool TIME_TO_SLEEP = false;
 
 // publish after x seconds
-unsigned int PUBLISH_DELAY = 2 * MINUTE;
+unsigned int PUBLISH_DELAY = 30 * SECOND;
 
 // retrieve cell location after x seconds IF NO FIX
 unsigned int CELL_LOCATION_DELAY = 1 * MINUTE;
@@ -89,7 +92,7 @@ unsigned int CELL_LOCATION_IGNORE_ACCURACY = 5000;
 unsigned int NO_MOTION_IDLE_SLEEP_DELAY = 3 * MINUTE;
 
 // lets wakeup every 6 hours and check in 
-unsigned int HOW_LONG_SHOULD_WE_SLEEP = 6 * HOUR;
+unsigned int HOW_LONG_SHOULD_WE_SLEEP = 5 * MINUTE;
 
 // When manually asked to sleep
 unsigned int SLEEP_TIME = 1 * HOUR;
@@ -109,7 +112,7 @@ void initAccel() {
 
     pinMode(WKP, INPUT_PULLUP);
 
-    if (!accel.setupLowPowerWakeMode(16)) {
+    if (!accel.setupLowPowerWakeMode(wakeThreshold)) {
         Serial.println("Accel: Unable to configure wake mode!");
     }
     accel.enableTemperature();
@@ -166,7 +169,8 @@ void activateGPS() {
 
 
 
-int publishMode(String mode);
+int publishModeHandler(String mode);
+int goToSleepHandler(String value);
 void button_clicked(system_event_t event, int param);
 
 
@@ -183,7 +187,8 @@ void setup() {
     pinMode(D7, OUTPUT);
     digitalWrite(D7, LOW);
 
-    Particle.function("publish", publishMode);
+    Particle.function("publishMode", publishModeHandler);
+    Particle.function("goToSleep", goToSleepHandler);
 
     // Setup manual sleep button clicks
     System.on(button_final_click, button_clicked);
@@ -206,8 +211,13 @@ void colorDelay(uint16_t timeDelay) {
 }
 
 
-int publishMode(String mode) {
+int publishModeHandler(String mode) {
     PUBLISH_MODE = (mode == "enabled") ? true : false;
+    return 1;
+}
+
+int goToSleepHandler(String value) {
+    TIME_TO_SLEEP = true;
     return 1;
 }
 
@@ -326,6 +336,7 @@ void publishLocation() {
             String loc_data =
                     "{\"lat\":"      + String(_cell_locate.lat)
                 + ",\"lon\":"      + String(_cell_locate.lng)
+                + ",\"url\":"      + "\"https://www.google.com/maps/search/?api=1&query=" + String(_cell_locate.lat) + "," + String(_cell_locate.lng) + "\""
                 + ",\"alt\":"        + String(_cell_locate.altitude)
                 + ",\"fix\":"        + String(_cell_locate.uncertainty)
                 + ",\"src\":\"gsm\""
@@ -342,6 +353,7 @@ void publishLocation() {
             String loc_data =
                     "{\"lat\":"      + String(convertDegMinToDecDeg(GPS.latitude))
                 + ",\"lon\":-"     + String(convertDegMinToDecDeg(GPS.longitude))
+                + ",\"url\":"      + "\"https://www.google.com/maps/search/?api=1&query=" + String(convertDegMinToDecDeg(GPS.latitude)) + ",-" + String(convertDegMinToDecDeg(GPS.longitude)) + "\""
                 + ",\"alt\":"        + String(GPS.altitude)
                 + ",\"fix\":"        + String(GPS.fixquality)
                 + ",\"src\":\"gps\""
@@ -570,6 +582,7 @@ void loop() {
     idleSleep(now);
 
     if(TIME_TO_SLEEP) {
+        TIME_TO_SLEEP = false;
         sleep();
     }
 
