@@ -83,7 +83,7 @@ bool LIS3DH::setupLowPowerWakeMode(uint8_t movementThreshold) {
 
 		// Remember the INT1_CFG setting because we're apparently supposed to set it again after
 		// clearing an interrupt.
-		int1_cfg = INT1_CFG_YHIE_YUPE | INT1_CFG_XHIE_XUPE;
+		int1_cfg = INT1_CFG_ZHIE_ZUPE | INT1_CFG_YHIE_YUPE;
 		writeRegister8(REG_INT1_CFG, int1_cfg);
 
 		// Clear the interrupt just in case

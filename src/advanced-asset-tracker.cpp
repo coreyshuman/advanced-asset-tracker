@@ -2,7 +2,7 @@
 //       THIS IS A GENERATED FILE - DO NOT EDIT       //
 /******************************************************/
 
-#line 1 "d:/Devel/scoot-track/scoot-track/src/advanced-asset-tracker.ino"
+#line 1 "/home/corey/development/advanced-asset-tracker-cts-update-adafruit-accel/src/advanced-asset-tracker.ino"
 /* 
     GPS Asset tracker for Particle Electron using accelerometer wake-on-move.
     
@@ -54,7 +54,7 @@ void checkCellLocation();
 void idleReDeactivateGPS();
 void idleSleep(unsigned long now);
 void loop();
-#line 35 "d:/Devel/scoot-track/scoot-track/src/advanced-asset-tracker.ino"
+#line 35 "/home/corey/development/advanced-asset-tracker-cts-update-adafruit-accel/src/advanced-asset-tracker.ino"
 #define GPSSerial Serial1
 Adafruit_GPS GPS(&GPSSerial);
 LIS3DH accel(SPI, A2, WKP);
@@ -62,12 +62,18 @@ FuelGauge fuel;
 
 SerialDebugOutput debugOutput;
 
-#define PREFIX "t/"
+#define PREFIX          "t/"
 #define CLICKTHRESHHOLD 20
+#define SECOND          1000
+#define MINUTE          60 * SECOND
+#define HOUR            60 * MINUTE
 
 // Threshold to trigger a publish
 // 9000 is VERY sensitive, 12000 will still detect small bumps
-int accelThreshold = 12000;
+int accelThreshold = 22000;
+
+// 16mg per point
+int wakeThreshold = 32;
 
 
 // SYSTEM_THREAD(ENABLED);
@@ -89,43 +95,47 @@ bool          GPS_ACTIVE         = false;
 unsigned long GPS_ACTIVATED_AT   = 0;
 unsigned long GPS_DEACTIVATED_AT = 0;
 
-unsigned long GPS_NO_FIX_SHUTDOWN = (10 * 60 * 1000);
-unsigned long GPS_NO_FIX_STARTUP  = (10 * 60 * 1000);
+unsigned long GPS_NO_FIX_SHUTDOWN = 10 * MINUTE;
+unsigned long GPS_NO_FIX_STARTUP  = 10 * MINUTE;
 
 bool PUBLISH_MODE = true; // Publish by default
 
 bool TIME_TO_SLEEP = false;
 
 // publish after x seconds
-unsigned int PUBLISH_DELAY = (120 * 1000);
+unsigned int PUBLISH_DELAY = 30 * SECOND;
 
 // retrieve cell location after x seconds IF NO FIX
-unsigned int CELL_LOCATION_DELAY = (60 * 1000);
-unsigned int CELL_LOCATION_TIMEOUT = (10 * 1000);
+unsigned int CELL_LOCATION_DELAY = 1 * MINUTE;
+unsigned int CELL_LOCATION_TIMEOUT = 10 * SECOND;
 unsigned int CELL_LOCATION_REQ_ACCURACY = 100;
 unsigned int CELL_LOCATION_IGNORE_ACCURACY = 5000;
 
 // if no motion for 3 minutes, sleep! (milliseconds)
-unsigned int NO_MOTION_IDLE_SLEEP_DELAY = (3 * 60 * 1000);
+unsigned int NO_MOTION_IDLE_SLEEP_DELAY = 3 * MINUTE;
 
-// lets wakeup every 6 hours and check in (seconds)
-unsigned int HOW_LONG_SHOULD_WE_SLEEP = (6 * 60 * 60);
+// lets wakeup every 6 hours and check in 
+unsigned int HOW_LONG_SHOULD_WE_SLEEP = 5 * MINUTE;
 
 // When manually asked to sleep
-unsigned int SLEEP_TIME = 3600; // Sleep for an hour by default
+unsigned int SLEEP_TIME = 1 * HOUR;
 
 // when we wakeup from deep-sleep not as a result of motion,
 // how long should we wait before we publish our location?
 // lets set this to less than our sleep time, so we always idle check in.
-// (seconds)
-int MAX_IDLE_CHECKIN_DELAY = (HOW_LONG_SHOULD_WE_SLEEP - 60);
+int MAX_IDLE_CHECKIN_DELAY = (HOW_LONG_SHOULD_WE_SLEEP - MINUTE);
+
+
+// Function Declarations
+void publish(const char * eventName, const char * eventData, int ttl, PublishFlags flags1);
+
 
 void initAccel() {
     Serial.println("Accel: Initialising...");
 
     pinMode(WKP, INPUT_PULLUP);
 
-    if (!accel.setupLowPowerWakeMode(16)) {
+    if (!accel.setupLowPowerWakeMode(wakeThreshold)) {
         Serial.println("Accel: Unable to configure wake mode!");
     }
     accel.enableTemperature();
@@ -182,7 +192,8 @@ void activateGPS() {
 
 
 
-int publishMode(String mode);
+int publishModeHandler(String mode);
+int goToSleepHandler(String value);
 void button_clicked(system_event_t event, int param);
 
 
@@ -199,7 +210,8 @@ void setup() {
     pinMode(D7, OUTPUT);
     digitalWrite(D7, LOW);
 
-    Particle.function("publish", publishMode);
+    Particle.function("publishMode", publishModeHandler);
+    Particle.function("goToSleep", goToSleepHandler);
 
     // Setup manual sleep button clicks
     System.on(button_final_click, button_clicked);
@@ -222,8 +234,13 @@ void colorDelay(uint16_t timeDelay) {
 }
 
 
-int publishMode(String mode) {
+int publishModeHandler(String mode) {
     PUBLISH_MODE = (mode == "enabled") ? true : false;
+    return 1;
+}
+
+int goToSleepHandler(String value) {
+    TIME_TO_SLEEP = true;
     return 1;
 }
 
@@ -256,8 +273,8 @@ void sleep() {
     fuel.sleep();
 
     // reset the accelerometer interrupt so we can sleep without instantly waking
-    bool awake = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
-    System.sleep(SLEEP_MODE_DEEP, HOW_LONG_SHOULD_WE_SLEEP);
+    volatile bool awake = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
+    System.sleep(SLEEP_MODE_DEEP, HOW_LONG_SHOULD_WE_SLEEP / SECOND);
 }
 
 
@@ -274,7 +291,7 @@ void button_clicked(system_event_t event, int param)
         }
 }
 
-
+// cts todo - move this to separate file and operate in it's own thread
 void checkGPS() {
     if(gpsActivated()) {
         // process and dump everything from the module through the library.
@@ -282,6 +299,9 @@ void checkGPS() {
             char c = GPS.read();
 
             // lets echo the GPS output until we get a good clock reading, then lets calm things down.
+            if(!GPS.fix) {
+                Serial.print(c);
+            }
 
             if (GPS.newNMEAreceived()) {
                 GPS.parse(GPS.lastNMEA());
@@ -327,65 +347,66 @@ void gpsHint(MDM_CELL_LOCATE& loc) {
 
 
 void publishLocation() {
-    if(PUBLISH_MODE) {
-        unsigned long now = millis();
-        if (((now - lastPublish) > PUBLISH_DELAY) || (lastPublish == 0)) {
-            lastPublish = now;
+    unsigned long now = millis();
+    if (((now - lastPublish) > PUBLISH_DELAY) || (lastPublish == 0)) {
+        lastPublish = now;
 
-            unsigned int msSinceLastMotion = (now - lastMotion);
-            int motionInTheLastMinute = (msSinceLastMotion < 60000);
+        unsigned int msSinceLastMotion = (now - lastMotion);
+        int motionInTheLastMinute = (msSinceLastMotion < 60000);
 
-            if(!GPS.fix && is_cell_locate_accurate(_cell_locate,CELL_LOCATION_IGNORE_ACCURACY)) {
-                Serial.println("Publish: No GPS Fix, reporting Cellular location...");
-                String loc_data =
-                      "{\"lat\":"      + String(_cell_locate.lat)
-                    + ",\"lon\":"      + String(_cell_locate.lng)
-                    + ",\"a\":"        + String(_cell_locate.altitude)
-                    + ",\"q\":"        + String(_cell_locate.uncertainty)
-                    + ",\"t\":\"gsm\""
-                    + ",\"spd\":"      + String(_cell_locate.speed)
-                    + ",\"mot\":"      + String(motionInTheLastMinute)
-                    + ",\"s\": 0"
-                    + ",\"vcc\":"      + String(fuel.getVCell())
-                    + ",\"soc\":"      + String(fuel.getSoC())
-                    + ",\"tmp\":"      + String(accel.getTemperature())
-                    + "}";
-                Particle.publish(PREFIX + String("l"), loc_data, 60, PRIVATE);
-            } else if (GPS.fix) {
-                Serial.println("Publish: GPS Fix available, reporting...");
-                String loc_data =
-                      "{\"lat\":"      + String(convertDegMinToDecDeg(GPS.latitude))
-                    + ",\"lon\":-"     + String(convertDegMinToDecDeg(GPS.longitude))
-                    + ",\"a\":"        + String(GPS.altitude)
-                    + ",\"q\":"        + String(GPS.fixquality)
-                    + ",\"t\":\"gps\""
-                    + ",\"spd\":"      + String(GPS.speed * 0.514444)
-                    + ",\"mot\":"      + String(motionInTheLastMinute)
-                    + ",\"s\": "       + String(GPS.satellites)
-                    + ",\"vcc\":"      + String(fuel.getVCell())
-                    + ",\"soc\":"      + String(fuel.getSoC())
-                    + ",\"tmp\":"      + String(accel.getTemperature())
-                    + "}";
-                Particle.publish(PREFIX + String("l"), loc_data, 60, PRIVATE);
-            } else {
-                Particle.publish(PREFIX + String("s"), "no_fix", 60, PRIVATE);
-            }
+        if(!GPS.fix && is_cell_locate_accurate(_cell_locate,CELL_LOCATION_IGNORE_ACCURACY)) {
+            Serial.println("Publish: No GPS Fix, reporting Cellular location...");
+            String loc_data =
+                    "{\"lat\":"      + String(_cell_locate.lat)
+                + ",\"lon\":"      + String(_cell_locate.lng)
+                + ",\"url\":"      + "\"https://www.google.com/maps/search/?api=1&query=" + String(_cell_locate.lat) + "," + String(_cell_locate.lng) + "\""
+                + ",\"alt\":"        + String(_cell_locate.altitude)
+                + ",\"fix\":"        + String(_cell_locate.uncertainty)
+                + ",\"src\":\"gsm\""
+                + ",\"spd\":"      + String(_cell_locate.speed)
+                + ",\"mot\":"      + String(motionInTheLastMinute)
+                + ",\"sat\": 0"
+                + ",\"vcc\":"      + String(fuel.getVCell())
+                + ",\"soc\":"      + String(fuel.getSoC())
+                + ",\"tmp\":"      + String(accel.getTemperature())
+                + "}";
+            publish(PREFIX + String("l"), loc_data, 60, PRIVATE);
+        } else if (GPS.fix) {
+            Serial.println("Publish: GPS Fix available, reporting...");
+            String loc_data =
+                    "{\"lat\":"      + String(convertDegMinToDecDeg(GPS.latitude))
+                + ",\"lon\":-"     + String(convertDegMinToDecDeg(GPS.longitude))
+                + ",\"url\":"      + "\"https://www.google.com/maps/search/?api=1&query=" + String(convertDegMinToDecDeg(GPS.latitude)) + ",-" + String(convertDegMinToDecDeg(GPS.longitude)) + "\""
+                + ",\"alt\":"        + String(GPS.altitude)
+                + ",\"fix\":"        + String(GPS.fixquality)
+                + ",\"src\":\"gps\""
+                + ",\"spd\":"      + String(GPS.speed * 0.514444)
+                + ",\"mot\":"      + String(motionInTheLastMinute)
+                + ",\"sat\": "       + String(GPS.satellites)
+                + ",\"vcc\":"      + String(fuel.getVCell())
+                + ",\"soc\":"      + String(fuel.getSoC())
+                + ",\"tmp\":"      + String(accel.getTemperature())
+                + "}";
+            publish(PREFIX + String("l"), loc_data, 60, PRIVATE);
+        } else {
+            publish(PREFIX + String("s"), "no_fix", 60, PRIVATE);
         }
+    }
+}
+
+void publish(const char * eventName, const char * eventData, int ttl, PublishFlags flags1) {
+    if(PUBLISH_MODE) {
+        Particle.publish(eventName, eventData, ttl, flags1);
+    } else {
+        Serial.printlnf("$s: $s", eventName, eventData);
     }
 }
 
 
 bool hasMotion() {
-   // bool motion = digitalRead(WKP);
-
-    uint8_t regValue = accel.readRegister8(accel.REG_INT1_SRC);
-    bool motion = ((regValue & accel.INT1_SRC_IA) != 0);
+    bool motion = ((accel.clearInterrupt() & accel.INT1_SRC_IA) != 0);
 
     digitalWrite(D7, (motion) ? HIGH : LOW);
-
-    if (motion) {
-        initAccel();
-    }
 
     return motion;
 }
@@ -400,15 +421,19 @@ void checkMotion(unsigned long now) {
         // Activate GPS module if inactive
         if(!gpsActivated()) {
             activateGPS();
+            delay(250);
+            initAccel();
         }
+        
 
         if (Particle.connected() == false) {
             // Init GPS now, gives the module a little time to fix while particle connects
             Serial.println("checkMotion: Connecting...");
             Cellular.on();
             Particle.connect();
-            Particle.publish(PREFIX + String("s"), "motion_checkin", 1800, PRIVATE);
+            publish(PREFIX + String("s"), "motion_checkin", 1800, PRIVATE);
         }
+        
     }
 }
 
@@ -420,7 +445,7 @@ void idleCheckin() {
     }
 
     // use the real-time-clock here, instead of millis.
-    if ((Time.now() - lastIdleCheckin) >= MAX_IDLE_CHECKIN_DELAY) {
+    if ((Time.now() - lastIdleCheckin) >= MAX_IDLE_CHECKIN_DELAY / SECOND) {
 
         // Activate GPS module if inactive
         if(!gpsActivated()) {
@@ -434,7 +459,7 @@ void idleCheckin() {
             Particle.connect();
         }
 
-        Particle.publish(PREFIX + String("s"), "idle_checkin", 1800, PRIVATE);
+        publish(PREFIX + String("s"), "idle_checkin", 1800, PRIVATE);
         lastIdleCheckin = Time.now();
     }
 }
@@ -517,6 +542,7 @@ void loop() {
         initAccel();
         Serial.print("!"); // cts debug
     } else {
+        /*
         if ((now - lastAcceMessage) > 1000) {
             lastAcceMessage = now;
             uint16_t accelMag = accel.readXYZmagnitude();
@@ -530,6 +556,7 @@ void loop() {
 
             }
         }
+        */
     }
 
     /* Check to see if we've seen any motion
@@ -578,6 +605,7 @@ void loop() {
     idleSleep(now);
 
     if(TIME_TO_SLEEP) {
+        TIME_TO_SLEEP = false;
         sleep();
     }
 
