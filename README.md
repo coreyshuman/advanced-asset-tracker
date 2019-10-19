@@ -67,3 +67,17 @@ When you're ready to compile your project, make sure you have the correct Partic
 - Everything in the `/src` folder, including your `.ino` application file
 - The `project.properties` file for your project
 - Any libraries stored under `lib/<libraryname>/src`
+
+## Project Setup (Mac)
+**1. Install the CLI by running the following command:**  
+  - `bash <( curl -sL https://particle.io/install-cli )`
+*More detailed instructions here:* https://docs.particle.io/tutorials/developer-tools/cli/#using-macos-or-linux  
+
+2. Install Particle Workbench plugin for Visual Studio Code
+  - https://docs.particle.io/tutorials/developer-tools/workbench/
+
+3. Build and program firmware over USB following Workbench instructions:
+  - https://docs.particle.io/tutorials/developer-tools/workbench/
+  - Use latest official DeviceOS release
+  - Use `Local Flash` option
+
